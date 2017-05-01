@@ -1,0 +1,13 @@
+ThreadCount=500
+
+ConnectionString=mongodb://vishitest:AIvz9ZQ30sBKzP1lo2RAdw4pytkK3T1TpgRoxz3SODA8LTQBM5z6GNX7SaCK5BrogYI7iNxGp4kIISk3ZSkQcw==@vishitest-northeurope.documents-test.windows-int.net:10250/?ssl=true
+UserName=vishitest
+Password=AIvz9ZQ30sBKzP1lo2RAdw4pytkK3T1TpgRoxz3SODA8LTQBM5z6GNX7SaCK5BrogYI7iNxGp4kIISk3ZSkQcw==
+AccEndpoint=vishitest-northeurope.documents-test.windows-int.net
+Port=10250
+DatabaseName=perfTestDB
+CollectionName=perfTestCollMP
+IsPCollection=true
+NumberOfDocumentsToInsert=100000
+CollectionPartitionKeyField=partitionKey
+DocumentTemplateFile=sample.json
