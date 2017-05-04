@@ -110,7 +110,7 @@ Multi  Partition | 250000 | 134 | 24
 
 ### Running
 
-Here is a sample output for single partition 10K RU collection:
+Here is a portion of output running against single partition 10K RU collection:
 
 ```
 Inserted 4920 docs @ 351.428558 writes/s, 9656.500000 RU/s
