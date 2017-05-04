@@ -25,13 +25,16 @@ import com.mongodb.MongoClient;
 import com.mongodb.MongoClientOptions;
 import com.mongodb.MongoCommandException;
 import com.mongodb.MongoCredential;
+import com.mongodb.MongoSocketOpenException;
+import com.mongodb.MongoSocketWriteException;
 import com.mongodb.ServerAddress;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.BulkWriteOptions;
+import com.mongodb.client.model.InsertOneModel;
 
 public class PerfTest {
-	
-	public static String mongoConnectionString;
+    
 	public static String mongoDBName;
 	public static String mongoCollName;
 	public static String sampleDocumentFile;
@@ -41,7 +44,9 @@ public class PerfTest {
 	public static String accEndpoint;
 	
 	public static boolean isPCollection;
+	public static boolean preProvisioned;
 	public static int numberOfDocumentsToInsert;
+	public static int batchsize;
 	public static int numThreads;
 	public static int mongoPort;
 	
@@ -54,12 +59,16 @@ public class PerfTest {
 	public static List<Thread> threads;
 	
 	public static AtomicInteger documentsInserted = new AtomicInteger(0);
-	public static double rusConsumed = 0.0;
+	
+	public static AtomicInteger rusConsumed = new AtomicInteger(0);
 	
 	public static void main(final String[] args) {
-		PerfTest.ParseConfig();
 		
-		PerfTest.Setup();
+		PerfTest.ParseConfig();
+
+		PerfTest.PrintConfig();
+		
+		PerfTest.Setup();		
 		
 		PerfTest.StartThreads();	
 		
@@ -77,10 +86,11 @@ public class PerfTest {
 			//read and populate properties
 			PerfTest.numThreads = Integer.parseInt(props.getProperty("ThreadCount"));
 			PerfTest.numberOfDocumentsToInsert = Integer.parseInt(props.getProperty("NumberOfDocumentsToInsert"));
-			PerfTest.mongoConnectionString = props.getProperty("ConnectionString");
+			PerfTest.batchsize = Integer.parseInt(props.getProperty("BatchSize"));
 			PerfTest.mongoDBName = props.getProperty("DatabaseName");
 			PerfTest.mongoCollName = props.getProperty("CollectionName");
 			PerfTest.isPCollection = Boolean.parseBoolean(props.getProperty("IsPCollection"));
+			PerfTest.preProvisioned = Boolean.parseBoolean(props.getProperty("PreProvisioned"));
 			PerfTest.partitionKeyField = props.getProperty("CollectionPartitionKeyField");
 			PerfTest.sampleDocumentFile = props.getProperty("DocumentTemplateFile");
 			
@@ -96,15 +106,29 @@ public class PerfTest {
 		}		
 	}
 	
+	private static void PrintConfig()
+	{
+		System.out.println("Summary:");
+		System.out.println("---------------------------------------------------------------------");
+		System.out.println("Endpoint: "+PerfTest.accEndpoint+":"+PerfTest.mongoPort);
+		System.out.println("Collection: "+PerfTest.mongoDBName+"."+PerfTest.mongoCollName);
+		System.out.println("Document Template: "+PerfTest.sampleDocumentFile);
+		System.out.println("Degree of parallelism: "+PerfTest.numThreads);
+		System.out.println("Batchsize: "+PerfTest.batchsize);
+		System.out.println("---------------------------------------------------------------------");
+		System.out.println();
+		System.out.println("DocumentDBBenchmark starting...");
+	}
+	
 	//setup
 	private static void Setup()
 	{
-		
+		System.out.println("Creating mongo client");
 		//get mongo client
 		MongoClientOptions cliOpt = MongoClientOptions.builder()
 				.connectionsPerHost(PerfTest.numThreads)
-				.minConnectionsPerHost(PerfTest.numThreads)
-				.threadsAllowedToBlockForConnectionMultiplier(1)
+				//.minConnectionsPerHost(PerfTest.numThreads)
+				//.threadsAllowedToBlockForConnectionMultiplier(1)
 				.sslEnabled(true).build();
 		
 		MongoCredential cred = MongoCredential.createCredential(PerfTest.userName, PerfTest.mongoDBName, PerfTest.password.toCharArray());
@@ -113,28 +137,42 @@ public class PerfTest {
 		
 		ServerAddress servAddr = new ServerAddress(PerfTest.accEndpoint, PerfTest.mongoPort);
 		PerfTest.client = new MongoClient(servAddr, credentials, cliOpt);
-		PerfTest.client.dropDatabase(PerfTest.mongoDBName);
 		PerfTest.db = PerfTest.client.getDatabase(PerfTest.mongoDBName);
+		PerfTest.coll = PerfTest.db.getCollection(PerfTest.mongoCollName);
 		
-
-		//create collection (single or partitioned based on config)
-		if(PerfTest.isPCollection)
+		if(!PerfTest.preProvisioned)
 		{
-			BsonDocument cmd = new BsonDocument();
-			String fullCollName = PerfTest.mongoDBName+"."+PerfTest.mongoCollName;
-			cmd.append("shardCollection", new BsonString(fullCollName));
-			BsonDocument keyDoc = new BsonDocument();
-			keyDoc.append(PerfTest.partitionKeyField, new BsonString("hashed"));
-			cmd.append("key", keyDoc);
-			PerfTest.db.runCommand(cmd);
-			PerfTest.coll = PerfTest.db.getCollection(PerfTest.mongoCollName);
-		}
-		else
-		{
-			PerfTest.coll = PerfTest.db.getCollection(PerfTest.mongoCollName);
+			PerfTest.coll.drop();
+			
+			try {
+				Thread.sleep(5000);
+			} catch (InterruptedException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+			
+			//create collection (single or partitioned based on config)
+			if(PerfTest.isPCollection)
+			{
+				System.out.println("Creating partitioned collection "+PerfTest.mongoCollName);
+				
+				BsonDocument cmd = new BsonDocument();
+				String fullCollName = PerfTest.mongoDBName+"."+PerfTest.mongoCollName;
+				cmd.append("shardCollection", new BsonString(fullCollName));
+				BsonDocument keyDoc = new BsonDocument();
+				keyDoc.append(PerfTest.partitionKeyField, new BsonString("hashed"));
+				cmd.append("key", keyDoc);
+				PerfTest.db.runCommand(cmd);
+			}
+			else
+			{
+				System.out.println("Creating collection "+PerfTest.mongoCollName);
+			}
 		}
 		
+		PerfTest.coll = PerfTest.db.getCollection(PerfTest.mongoCollName);
 	
+		System.out.println("Loading sample document "+PerfTest.sampleDocumentFile);
 		try {
 			//read sample json document
 			JSONParser parser = new JSONParser();
@@ -154,12 +192,14 @@ public class PerfTest {
 		}
 	}
 	
+
 	private static void StartThreads()
 	{
+		System.out.println("Starting Inserts with "+PerfTest.numThreads+" threads");
 		PerfTest.threads = new ArrayList<Thread>(PerfTest.numThreads);
 		for(int i=0;i<PerfTest.numThreads;i++)
 		{
-			Thread t = new Thread(new InsertDocument(PerfTest.db, PerfTest.coll, PerfTest.numberOfDocumentsToInsert, PerfTest.partitionKeyField, PerfTest.sampleDocument));
+			Thread t = new Thread(new InsertDocument(PerfTest.db, PerfTest.coll, Math.ceil((double)PerfTest.numberOfDocumentsToInsert/(double)PerfTest.numThreads), PerfTest.partitionKeyField, PerfTest.sampleDocument));
 			PerfTest.threads.add(t);
 			t.start();
 		}
@@ -168,6 +208,10 @@ public class PerfTest {
 	private static void Monitor()
 	{
 		StopWatch watch = StopWatch.createStarted();
+		long elapsed  =  0;
+		int inserted = 0;
+		float insertsPerSec;
+		double rusPerSec = 0.0;
 		try
 		{
 			//periodically output data
@@ -184,20 +228,27 @@ public class PerfTest {
 	            	}
 	            }
 	            
-	            long elapsed  = watch.getNanoTime()/1000000000;
-	            int inserted = PerfTest.documentsInserted.get();
-	            float insertsPerSec = (float)inserted/(float)elapsed;
+	            elapsed  = watch.getNanoTime()/1000000000;
+	            inserted = PerfTest.documentsInserted.get();
+	            insertsPerSec = (float)inserted/(float)elapsed;
 	            
-	            double rusPerSec = PerfTest.getRUs()/(double)elapsed;
+	            rusPerSec = PerfTest.getRUs()/(double)elapsed;
 	            
-	            System.out.println(String.format("Time elapsed (s): %d, insertedCount: %d, Inserts per sec: %f RUs per sec: %f Active threads: %d", elapsed, inserted, insertsPerSec, rusPerSec, activeThreads));
+	            System.out.println(String.format("Inserted %d docs @ %f writes/s, %f RU/s", inserted, insertsPerSec, rusPerSec));
 	            
-	            if(activeThreads < 0)
+	            if(activeThreads <= 0)
 	            {
-	            	System.out.println("No active threads");
 	            	break;
 	            }
 			}
+			
+			System.out.println();
+			System.out.println("Summary:");
+			System.out.println("--------------------------------------------------------------------- ");
+			System.out.println(String.format("Inserted %d docs @ %f writes/s, %f RU/s", inserted, insertsPerSec, rusPerSec));
+			System.out.println("--------------------------------------------------------------------- ");
+			System.out.println("DocumentDB Mongo Benchmark completed successfully.");
+			
 		}
 		catch(Exception ex)
 		{
@@ -206,102 +257,140 @@ public class PerfTest {
 		
 	}
 	
-	private static synchronized void addRUs(double ruConsumed)
+	private static  void addRUs(double ruConsumed)
 	{
-		PerfTest.rusConsumed += ruConsumed;
+		PerfTest.rusConsumed.addAndGet((int)ruConsumed);
 	}
 	
-	private static synchronized double getRUs()
+	private static int getRUs()
 	{
-		return PerfTest.rusConsumed;
+		return PerfTest.rusConsumed.get();
 	}
 	
 	public static class InsertDocument implements Runnable {
 		
 		private MongoDatabase db;
 		private MongoCollection<Document> coll;
-		private int numDocsToInsert;
+		private double numDocsToInsert;
 		private String pkey;
 		private Map<String,Object> sampleDoc;
 		private int backoffFactor;
 		private static int backoffInterval = 1000;
+		private boolean working;
+		private long id;
+		private double ru;
 
-		public InsertDocument(MongoDatabase db, MongoCollection<Document> coll, int numDocs, String pkey, Map<String,Object> sampleDoc) {
+		public InsertDocument(MongoDatabase db, MongoCollection<Document> coll, double numDocs, String pkey, Map<String,Object> sampleDoc) {
 			this.db = db;
 			this.coll =coll;
 			this.numDocsToInsert = numDocs;
 			this.pkey = pkey;
 			this.sampleDoc = sampleDoc;
 			this.backoffFactor = 0;
+			this.working = false;
 		}
 		
 		public void run() {	
 			
-			for(int i=0;i<this.numDocsToInsert;i++)
+			this.id = Thread.currentThread().getId();	
+			List<InsertOneModel<Document>> docs = new ArrayList<InsertOneModel<Document>>(PerfTest.batchsize);
+			for(int i=0;i<this.numDocsToInsert;)
 			{
-				//create new doc
-				Map<String, Object> nDoc = new HashMap<String, Object>(this.sampleDoc);
-				String pval =  UUID.randomUUID().toString();
-				nDoc.put(this.pkey, pval);
-				//String id =  UUID.randomUUID().toString();
-				//nDoc.put("_id", id);
+				int j=0;
 				
-				Document d = new Document(nDoc);	
+				while(j<PerfTest.batchsize)
+				{
+					Map<String, Object> nDoc = new HashMap<String, Object>(this.sampleDoc);
+					Document d = new Document(nDoc);
+					String pval =  UUID.randomUUID().toString();
+					d.remove(this.pkey);
+					d.put(this.pkey, pval);
+					docs.add(new InsertOneModel<Document>(d));
+					j++;
+				}
+				
+				boolean res = true;
 				//safely insert doc
 				try {
-					this.InsertSafe(d);
+					res = this.InsertSafe(docs, PerfTest.batchsize);
 				} catch (Exception e) {
 					// TODO Auto-generated catch block
 					e.printStackTrace();
 					return;
 				}
+				
+				docs = new ArrayList<InsertOneModel<Document>>(PerfTest.batchsize);
+				if(res)
+				{
+					i+=batchsize;
+				}
+				
 			}
-			
 		}
 		
-		private void InsertSafe(Document doc) throws Exception {
-			boolean retry = true;
-			while(retry)
+		private boolean InsertSafe(List<InsertOneModel<Document>> docs, int batchSize) throws Exception {			
+			try
 			{
-				try
+				this.coll.bulkWrite(docs, new BulkWriteOptions().ordered(false));
+				
+				PerfTest.documentsInserted.addAndGet(batchSize);
+				
+				if(this.working == false)
 				{
-					this.coll.insertOne(doc);
-					
-					PerfTest.documentsInserted.incrementAndGet();
-					
 					this.AccountRUs();
-					
-					if(this.backoffFactor > 1) {
-						this.backoffFactor--;
-					}
-					return;
+					this.working = true;
 				}
-				catch (MongoCommandException ex)
-				{
-					if(ex.getCode() == 16500)
-					{
-						//throttled - do backoff
-						this.backoffFactor++;
-						try {
-							//System.out.println("Thread id: "+Thread.currentThread().getId()+" got throttled.. sleeping for... "+InsertDocument.backoffInterval * this.backoffFactor+"ms");
-							Thread.sleep(InsertDocument.backoffInterval * this.backoffFactor);
-						} catch (InterruptedException e) {
-							// TODO Auto-generated catch block
-							e.printStackTrace();
-						}
-					}
+				
+				PerfTest.addRUs(this.ru);
+				
+				if(this.backoffFactor > 1) {
+					this.backoffFactor--;
 				}
-				catch(Exception ex)
+				return true;
+			}
+			catch(MongoSocketOpenException ex)
+			{
+				//connect timed out error
+				Thread.sleep(5000);
+				return false;
+			}
+			catch(MongoSocketWriteException ex)
+			{
+				//connection closed by server due to throttling
+				Thread.sleep(5000);
+				return false;
+			}
+			catch (MongoCommandException ex)
+			{
+				if(ex.getCode() == 16500)
 				{
-					System.out.println("Thread id: "+Thread.currentThread().getId()+" failed unknown error.. exiting.. ");
-					ex.printStackTrace();
+					//throttled - do backoff
+					this.backoffFactor++;
+					try {
+						System.out.println("Thread id: "+this.id+" got throttled.. sleeping for... "+InsertDocument.backoffInterval * this.backoffFactor+"ms");
+						Thread.sleep(InsertDocument.backoffInterval * this.backoffFactor);
+					} catch (InterruptedException e) {
+						// TODO Auto-generated catch block
+						e.printStackTrace();
+					}
+					return false;
+				}
+				else
+				{
 					throw ex;
 				}
+				
+			}
+			catch(Exception ex)
+			{
+				System.out.println("Thread id: "+Thread.currentThread().getId()+" failed unknown error.. exiting.. ");				
+				throw ex;
 			}
 		}
 		
 		private void AccountRUs()
 		{
+			
 			BsonDocument cmd = new BsonDocument();
 			cmd.append("getLastRequestStatistics", new BsonInt32(1));
 			Document response = this.db.runCommand(cmd);
@@ -312,7 +401,7 @@ public class PerfTest {
 				{
 					if(response.containsKey("RequestCharge"))
 					{
-						PerfTest.addRUs(response.getDouble("RequestCharge"));
+						this.ru = response.getDouble("RequestCharge");
 					}
 					else
 					{
