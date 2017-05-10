@@ -1,6 +1,5 @@
-# DocumentDB - Mongo Protocol Support Perf tool
-
-This tool is used to verify/tune performance while using DocumentDB - Mongo Protocol support for a given collection.
+# Azure Cosmos DB - Performance testing using Mongo DB API support
+This tool is used to verify/tune performance while using Azure Cosmos DB - Mongo Protocol support for a given collection.
 It monitors and outputs the following metrics of interest:
 1. Inserts per second
 1. RUs (request units) per second 
@@ -133,7 +132,7 @@ Summary:
 --------------------------------------------------------------------- 
 Inserted 10080 docs @ 360.000000 writes/s, 9891.000000 RU/s
 --------------------------------------------------------------------- 
-DocumentDB Mongo Benchmark completed successfully.
+Azure Cosmos DB Mongo Benchmark completed successfully.
 ```
 
 
@@ -147,4 +146,4 @@ DocumentDB Mongo Benchmark completed successfully.
 
 ## Acknowledgments
 
-* This tool is built using [DocumentDB Benchmark tool](https://github.com/Azure/azure-documentdb-dotnet/tree/master/samples/documentdb-benchmark) as reference
+* This tool is built using [Azure Cosmos DB Benchmark tool](https://github.com/Azure/azure-documentdb-dotnet/tree/master/samples/documentdb-benchmark) as reference

@@ -117,7 +117,7 @@ public class PerfTest {
 		System.out.println("Batchsize: "+PerfTest.batchsize);
 		System.out.println("---------------------------------------------------------------------");
 		System.out.println();
-		System.out.println("DocumentDBBenchmark starting...");
+		System.out.println("Azure Cosmos DB Benchmark starting...");
 	}
 	
 	//setup
@@ -247,7 +247,7 @@ public class PerfTest {
 			System.out.println("--------------------------------------------------------------------- ");
 			System.out.println(String.format("Inserted %d docs @ %f writes/s, %f RU/s", inserted, insertsPerSec, rusPerSec));
 			System.out.println("--------------------------------------------------------------------- ");
-			System.out.println("DocumentDB Mongo Benchmark completed successfully.");
+			System.out.println("Azure Cosmos DB Mongo Benchmark completed successfully.");
 			
 		}
 		catch(Exception ex)
